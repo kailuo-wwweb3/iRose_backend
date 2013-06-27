@@ -92,7 +92,7 @@ def convertToString(uniString):
 
 class MainHandler(webapp2.RequestHandler):
 	def get(self):
-		self.response.out.write("df")
+		self.response.out.write("this works!")
 
 
 class ScheduleHandler(webapp2.RequestHandler):
@@ -148,12 +148,6 @@ class CourseRostersHandler(webapp2.RequestHandler):
 		global incoming_request
 		incoming_request = CourseRostersRequest(courseID=self.request.get('courseID'), termcode=self.request.get('termcode'), login=self.request.get('login'), password=self.request.get('password'))
 		self.redirect('/courseRosters')
-
-
-
-
-
-
 
 app = webapp2.WSGIApplication([
     ('/', MainHandler),
