@@ -25,9 +25,11 @@ from bs4 import BeautifulSoup
 import unicodedata
 from datetime import datetime
 import time
+import mechanize
 
 
 incoming_request = None
+idPhotoUserName = None
 
 class Request(ndb.Model):
 	login = ndb.StringProperty(default='')
@@ -80,10 +82,58 @@ def parseCourses(url, login, password):
 		count = count + 1
 	return {'content':courses}
 
+def fetchTerms(login, password):
+	terms = []
+	url = "https://prodweb.rose-hulman.edu/regweb-cgi/reg-sched.pl"
+	html = urlfetch.fetch(url, headers={"Authorization": "Basic %s" % base64.b64encode(login + ":" + password)})
+	soup = BeautifulSoup(html.content)
+	for term in soup.findAll(lambda tag : tag.name == 'option' and isInteger(tag['value'])):
+		terms.append({"termCode" : convertToString(term['value']), "termName" : convertToString(term.contents[0])})
+	return {'content':terms}
+
+def fetchLatestTerm(login, password):
+	terms = []
+	url = "https://prodweb.rose-hulman.edu/regweb-cgi/reg-sched.pl"
+	html = urlfetch.fetch(url, headers={"Authorization": "Basic %s" % base64.b64encode(login + ":" + password)})
+	soup = BeautifulSoup(html.content)
+	count = 0
+	for term in soup.findAll(lambda tag : tag.name == 'option' and isInteger(tag['value'])):
+		if count == 0:
+			terms.append({"termCode" : convertToString(term['value']), "termName" : convertToString(term.contents[0])})
+		else:
+			break
+	return {'content':terms}
+
+def isInteger(s):
+	try:
+		int(s)
+		return True
+	except ValueError:
+		return False
+
 def renderJson(output, s):
 	s.response.headers['Content-Type'] = 'application/json'
 	s.response.headers.add_header("Access-Control-Allow-Origin", "*")
-	s.response.out.write(output)
+	s.response.out.write(json.dumps(output))
+
+def fetchPhoto(username):
+	br = mechanize.Browser()
+	br.set_handle_robots(False)
+	page = br.open('http://angel.rose-hulman.edu/home.asp')
+	br.select_form(name="frmLogon")
+	br['username'] = 'luok'
+	br['password'] = 'Goseater555555'
+	br.submit()
+	page = br.open('http://angel.rose-hulman.edu/UserInfo.asp?id=' + username + '&ONEXIT=%2Fsection%2Fpeople%2Fdefault%2Easp')
+	soup = BeautifulSoup(page.read())
+	count = 0
+	for imgTag in soup.findAll(lambda tag: tag.name == 'img'):
+		if count == 1:
+			break
+		count += 1
+
+	# urllib.urlretrieve('http://angel.rose-hulman.edu' + imgTag['src'], 'photos/' + username + ".jpg")
+	return 'http://angel.rose-hulman.edu' + imgTag['src']
 
 
 def fetchCoursesBasedOnUsernameAndTerm(username, termcode, login, password):
@@ -103,12 +153,20 @@ def fetchRostersBasedOnCourseID(courseID, termcode, login, password):
 	return parseRosters(url, None, login, password)
 
 
+
 def convertToString(uniString):
 	return unicodedata.normalize('NFKD', uniString).encode('ascii','ignore')
+
+def fetchIDPhoto(username):
+	url = "http://angel.rose-hulman.edu/section/default.asp?id=GROUP-ALL"
+	html = urlfetch.fetch(url)
+	return html.content
 
 class MainHandler(webapp2.RequestHandler):
 	def get(self):
 		self.response.out.write("this works!")
+		
+
 
 
 class ScheduleHandler(webapp2.RequestHandler):
@@ -122,6 +180,7 @@ class ScheduleHandler(webapp2.RequestHandler):
 
 	def post(self):
 		global incoming_request
+		print self.request
 		incoming_request = SchedulePageRequest(username=self.request.get('username'), termcode=self.request.get('termcode'), login=self.request.get('login'), password=self.request.get('password'))
 		self.redirect('/schedule')
 
@@ -173,11 +232,54 @@ class AdvisorRostersHandler(webapp2.RequestHandler):
 		incoming_request = AdvisorRostersRequest(advisorID=self.request.get('advisorID'), termcode=self.request.get('termcode'), login=self.request.get('login'), password=self.request.get('password'))
 		self.redirect('/advisorRosters')
 
+class TermsFetcherHandler(webapp2.RequestHandler):
+	def get(self):
+		login = incoming_request.login
+		password = incoming_request.password
+		renderJson(fetchTerms(login, password), self)
+
+	def post(self):
+		global incoming_request
+		print "getting here!!!"
+		print self.request
+		incoming_request = Request(login=self.request.get('login'), password=self.request.get('password'))
+		self.redirect('/terms')
+
+
+
+class IDphotoFetcherHandler(webapp2.RequestHandler):
+	def get(self):
+		imageUrl = fetchPhoto(idPhotoUserName)
+		self.response.out.write(imageUrl)
+
+
+	def post(self):
+		global idPhotoUserName
+		idPhotoUserName = self.request.get('username')
+		self.redirect('/IDphoto')
+
+class LoginValidation(webapp2.RequestHandler):
+	def get(self):
+		response = urlfetch.fetch('https://prodweb.rose-hulman.edu/regweb-cgi/reg-sched.pl', headers={"Authorization": "Basic %s" % base64.b64encode('luok' + ":" + 'Goseater555555')})
+		if (response.status_code == 200):
+			self.response.out.write('valid')
+		else:
+			self.response.out.write('invalid')
+
+	def post(self):
+		global incoming_request
+		incoming_request = Request(login=self.request.get('login'), password=self.request.get('password'))
+		self.redirect('/validateLogin')
+
+
 
 app = webapp2.WSGIApplication([
     ('/', MainHandler),
     ('/schedule', ScheduleHandler),
     ('/courses', CoursesHandler),
     ('/courseRosters', CourseRostersHandler),
-    ('/advisorRosters', AdvisorRostersHandler)
+    ('/advisorRosters', AdvisorRostersHandler),
+    ('/terms', TermsFetcherHandler),
+    ('/IDphoto', IDphotoFetcherHandler),
+    ('/validateLogin', LoginValidation)
 ], debug=True)
